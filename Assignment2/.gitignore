@@ -1,0 +1,21 @@
+# Ignore build artifacts
+/build/
+/bin/
+/obj/
+
+# Ignore OS-specific files
+.DS_Store
+Thumbs.db
+
+# Ignore compiled libraries and object files
+*.o
+*.obj
+*.so
+*.dll
+*.exe
+*.a
+*.lib
+
+# Ignore logs and temporary files
+*.log
+*.tmp

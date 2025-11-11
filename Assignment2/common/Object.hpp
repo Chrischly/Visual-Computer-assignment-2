@@ -39,6 +39,8 @@ class Object{
         //! setShader
         /*! Set a shader object that will be used during the rendering of this object. */
         void setShader(Shader* newshader);
+
+        Shader* getShader() const { return shader; }
         
         //! getTransform
         /*! Get the transform matrix 4x4 of this object. */

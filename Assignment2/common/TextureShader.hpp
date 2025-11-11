@@ -31,7 +31,8 @@ class TextureShader: public Shader{
     /*! Bind the shader. */
     void bind();
     
-
+    void SetMVP(const glm::mat4& MVP); // <-- ADD THIS
+    
     private:
         glm::vec4 color;
         Texture* m_texture;

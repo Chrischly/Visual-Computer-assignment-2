@@ -43,27 +43,13 @@ add_definitions(
 # --------------------------------------------------------------------------
 # Assignment 2 - OpenCV camera feed on textured quad
 # --------------------------------------------------------------------------
+file(GLOB_RECURSE COMMON_SOURCES "common/*.cpp" "common/*.hpp")
+
 add_executable(Assignment2
-common/Shader.cpp
-    common/Shader.hpp
-	common/ColorShader.cpp
-    common/ColorShader.hpp
-    common/Camera.cpp
-    common/Camera.hpp
-    common/Scene.cpp
-    common/Scene.hpp
-    common/Object.cpp
-    common/Object.hpp
-    common/Triangle.cpp
-    common/Triangle.hpp
-	common/Texture.cpp
-    common/Texture.hpp
-	common/TextureShader.cpp
-    common/TextureShader.hpp
-	common/Quad.cpp
-    common/Quad.hpp
+    ${COMMON_SOURCES}
     source/webcamQuad.cpp
 )
+
 target_link_libraries(Assignment2
     ${ALL_LIBS}
 )

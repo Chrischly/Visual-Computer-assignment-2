@@ -4,7 +4,7 @@
 // Include GLEW
 //#include <GL/glew.h>
 #include <common/Shader.hpp>
-
+#include <glm/gtc/type_ptr.hpp>
 #include <stdio.h>
 #include <string>
 #include <vector>
@@ -151,4 +151,11 @@ void Shader::bind(){
 	// Use our shader
 	glUseProgram(programID);
 	
+}
+
+void Shader::SetMVP(const glm::mat4& mvp) {
+    GLint loc = glGetUniformLocation(programID, "MVP");
+    if (loc != -1) {
+        glUniformMatrix4fv(loc, 1, GL_FALSE, glm::value_ptr(mvp));
+    }
 }

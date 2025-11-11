@@ -41,3 +41,9 @@ void TextureShader::bind(){
     
 }
 
+void TextureShader::SetMVP(const glm::mat4& MVP) {
+    glUseProgram(programID);
+    GLuint MatrixID = glGetUniformLocation(programID, "MVP");
+    glUniformMatrix4fv(MatrixID, 1, GL_FALSE, &MVP[0][0]);
+}
+

@@ -30,6 +30,8 @@ public:
 	Shader(){
 		
 	}
+
+
     //! Constructor with shader source specification
     /*! Creates the shaders from source, creates vertex and fragment shader at the same time. 
         Uses different source file naming conventions*/
@@ -64,6 +66,8 @@ public:
     //! updateMVP
     /*! Updates the values for the model-view projection matrix*/
 	void updateMVP(glm::mat4 MVP);
+
+    void SetMVP(const glm::mat4& mvp);
 	
     //! bind
     /*! Shader binding, virtual */

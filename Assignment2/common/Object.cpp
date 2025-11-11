@@ -24,11 +24,8 @@ Object::Object(){
     
 }
 void Object::setShader(Shader* newshader){
-    if(shader!=NULL)
-        delete shader;
-    
     shader = newshader;
-    
+
 }
 glm::mat4 Object::getTransform(){
     return transform;
