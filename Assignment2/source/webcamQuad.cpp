@@ -14,6 +14,7 @@
 #include <common/Texture.hpp>
 #include <common/Scene.hpp>
 #include <common/Camera.hpp>
+#include <common/filters/CPUFilters.hpp>
 
 // --- Globals ---
 GLFWwindow* window;
@@ -157,14 +158,22 @@ int main() {
 
         } else {
             // --- CPU mode ---
+            cv::Mat processed;
+            if (filter == FILTER_PIXELATE) CPUFilters::pixelate(frame, processed, 10);
+            else if (filter == FILTER_SINCITY) CPUFilters::sinCity(frame, processed);
+            else processed = frame.clone();
+
+            // Apply affine transform for CPU mode
             cv::Mat rotated;
             cv::Point2f center(frame.cols / 2.0f, frame.rows / 2.0f);
             cv::Mat M = cv::getRotationMatrix2D(center, rotateAngle, scaleFactor);
             M.at<double>(0, 2) += translateX * frame.cols;
             M.at<double>(1, 2) -= translateY * frame.rows;
-            cv::warpAffine(frame, rotated, M, frame.size());
+            cv::warpAffine(processed, rotated, M, frame.size());
             cv::flip(rotated, rotated, 0);
             videoTexture->update(rotated.data, rotated.cols, rotated.rows, true);
+
+            // Shader: CPU always uses default shader
             quad->setShader(defaultShader);
         }
 
@@ -199,3 +208,4 @@ int main() {
     csv.close();
     return 0;
 }
+
