@@ -139,22 +139,20 @@ int main() {
         if (frame.empty()) break;
 
         if (useGPU) {
-            // --- GPU mode ---
+            // Update texture
             cv::flip(frame, frame, 0);
             videoTexture->update(frame.data, frame.cols, frame.rows, true);
 
-            // Select shader
+            // Apply quad transformations
+            quad->setTranslate(glm::vec3(translateX, translateY, 0.0f));
+            quad->setRotate(rotateAngle);
+            quad->setScale(scaleFactor);
+
+            // Choose filter shader
             if (filter == FILTER_PIXELATE) quad->setShader(pixelateShader);
             else if (filter == FILTER_SINCITY) quad->setShader(sinCityShader);
             else quad->setShader(defaultShader);
-
-            // Apply transformations (MVP)
-            MVP = glm::mat4(1.0f);
-            MVP = glm::translate(MVP, glm::vec3(translateX, translateY, 0.0f));
-            MVP = glm::rotate(MVP, glm::radians(rotateAngle), glm::vec3(0, 0, 1));
-            MVP = glm::scale(MVP, glm::vec3(scaleFactor, scaleFactor, 1.0f));
-
-            quad->getShader()->SetMVP(MVP);
+           
 
         } else {
             // --- CPU mode ---

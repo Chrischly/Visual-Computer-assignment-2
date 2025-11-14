@@ -57,6 +57,8 @@ class Object{
         //! setTranslate
         /*! Set defined translate this object. */
         void setTranslate(glm::vec3 translateVec);
+
+        void setRotate(float zDegrees);
         //! setScale
         /*! Set defined scale this object. */
         void setScale(float scale);
