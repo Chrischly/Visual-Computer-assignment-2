@@ -11,7 +11,6 @@ void main() {
     // Apply MVP directly — this lets GPU do transformations
     gl_Position = MVP * vec4(vertexPosition_modelspace, 1.0);
 
-    // Keep your working UV mapping
     vec2 normalized_pos = vec2(vertexPosition_modelspace.x / aspectRatio, vertexPosition_modelspace.y);
     UV = normalized_pos * 0.5 + 0.5;
 

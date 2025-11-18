@@ -18,6 +18,7 @@
         "xstring": "cpp",
         "xtree": "cpp",
         "xutility": "cpp",
-        "string": "cpp"
+        "string": "cpp",
+        "thread": "cpp"
     }
 }
