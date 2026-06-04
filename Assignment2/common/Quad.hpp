@@ -47,8 +47,8 @@ class Quad:  public Object{
         
         GLfloat g_vertex_buffer_data[18];
         GLuint uvbuffer;
-        GLuint vertexbuffer;
-    
+        GLuint vertexbuffer = 0;
+        GLuint vao = 0; //new
 };
 
 

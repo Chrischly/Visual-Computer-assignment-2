@@ -55,6 +55,17 @@ target_link_libraries(Assignment2
 )
 
 # --------------------------------------------------------------------------
+# Camera calibration utility
+# --------------------------------------------------------------------------
+add_executable(CalibrateCam
+    source/calibrate.cpp
+)
+
+target_link_libraries(CalibrateCam
+    ${ALL_LIBS}
+)
+
+# --------------------------------------------------------------------------
 # Automatically copy shaders from src/ to the executable folder
 # --------------------------------------------------------------------------
 file(GLOB SHADERS "source/*.vert" "source/*.frag")

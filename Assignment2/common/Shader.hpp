@@ -68,6 +68,8 @@ public:
 	void updateMVP(glm::mat4 MVP);
 
     void SetMVP(const glm::mat4& mvp);
+
+    void setMat4(const std::string &name, const glm::mat4 &mat);
 	
     //! bind
     /*! Shader binding, virtual */

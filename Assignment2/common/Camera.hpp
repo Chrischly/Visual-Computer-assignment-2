@@ -54,7 +54,11 @@ public:
     //! Set position
     /*!  Set position. */
     void setPosition(glm::vec3 pos);
-    
+
+    //! Set projection matrix
+    /*!  Set custom projection matrix. */
+    void setProjectionMatrix(glm::mat4 proj);
+
     //! Update angles.
     /*!  Set after setting the angles the camera settings neeed to be updated. */
     void updateAngles();

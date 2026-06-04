@@ -19,6 +19,10 @@
 #include <glm/gtx/norm.hpp>
 #include "Shader.hpp"
 #include "Camera.hpp"
+#include "Object.hpp"
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glad/gl.h>
 
 
 //!  Object.

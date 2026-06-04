@@ -8,7 +8,6 @@
 
 #include <opencv2/opencv.hpp>
 #include <glad/gl.h>
-#define GLAD_GL_IMPLEMENTATION
 #include <GLFW/glfw3.h>
 
 #include <glm/glm.hpp>
@@ -21,6 +20,11 @@
 #include <common/Scene.hpp>
 #include <common/Camera.hpp>
 #include <common/filters/CPUFilters.hpp>
+#include <common/Cube.hpp>
+#include <opencv2/aruco.hpp>
+#include <opencv2/calib3d.hpp>
+#include <glm/gtc/type_ptr.hpp>
+#include <glm/gtx/matrix_decompose.hpp>
 
 using namespace std;
 
@@ -361,7 +365,7 @@ int main() {
     cap.set(cv::CAP_PROP_FPS, 30);
 
     if (!warmupCamera(cap, 80, 15)) {
-        cerr << "[WARN] Camera warmup failed to get frames quickly — continuing anyway\n";
+        cerr << "[WARN] Camera warmup failed to get frames quickly â€” continuing anyway\n";
     }
 
     if (!initWindow("Video Processing")) return -1;
@@ -378,6 +382,7 @@ int main() {
         glfwTerminate();
         return -1;
     }
+
     cv::flip(frame, frame, 0);
 
     // Create resources
@@ -386,6 +391,7 @@ int main() {
     TextureShader* defaultShader = new TextureShader("videoTextureShader.vert", "videoTextureShader.frag");
     TextureShader* pixelateShader = new TextureShader("videoTextureShader.vert", "pixelate.frag");
     TextureShader* sinCityShader  = new TextureShader("videoTextureShader.vert", "sincity.frag");
+    
 
     defaultShader->setTexture(videoTexture);
     pixelateShader->setTexture(videoTexture);
@@ -398,13 +404,99 @@ int main() {
     Quad* quad = new Quad((float)frame.cols / (float)frame.rows);
     quad->setShader(defaultShader);
     scene->addObject(quad);
+    //--------------------------------------
+    // CREATE 3D CUBE FOR AR OVERLAY
+    //--------------------------------------
+    Cube* cube = new Cube();
+    cube->setScale(glm::vec3(0.05f));   // Scale cube to 5cm (half of 10cm marker)
+    cube->setVisible(false);            // hidden until a marker is detected
+    Shader* simple3DShader = new Shader("cube.vert", "cube.frag"); // or use existing shader
+    cube->setShader(new Shader("cube.vert", "cube.frag"));
+    scene->addObject(cube);
 
+
+    
     // Interactive FPS logging CSV
-    std::ofstream csv("fps_log.csv", ios::app);
-    if (csv.tellp() == 0) csv << "Frame,Backend,Filter,FPS\n";
+    std::ofstream csv("fps_log.csv");
+csv << "Frame,Backend,Filter,FPS\n";
+
+    // ---- POSE LOGGING CSV ----
+    std::ofstream poseCSV("pose_log.csv");
+    poseCSV << "frame,tx,ty,tz,rx,ry,rz\n";
 
     int frameCount = 0;
     auto startTime = chrono::high_resolution_clock::now();
+
+    // ---- ARUCO SETUP ----
+    cv::aruco::Dictionary arucoDictObj =
+    cv::aruco::getPredefinedDictionary(cv::aruco::DICT_6X6_50);
+
+    cv::Ptr<cv::aruco::Dictionary> arucoDict = 
+    cv::makePtr<cv::aruco::Dictionary>(arucoDictObj);
+
+
+
+
+    std::vector<int> markerIds;
+    std::vector<std::vector<cv::Point2f>> markerCorners;
+
+    /** STANDARD CAMERA INTRINSICS â€” REPLACE WITH CALIBRATED VALUES FOR BEST RESULTS
+    cv::Mat cameraMatrix = (cv::Mat1d(3,3) <<
+    1000, 0, frame.cols/2,
+    0, 1000, frame.rows/2,
+    0, 0, 1
+    );
+
+    cv::Mat distCoeffs = cv::Mat::zeros(1, 5, CV_64F); 
+
+
+    // My calibrated camera intrinsics:
+    cv::Mat cameraMatrix = (cv::Mat1d(3,3) <<
+        833.77442760678105, 0.0, 311.2045296538675,
+        0.0, 837.7048165040502, 186.13605911537414,
+        0.0, 0.0, 1.0
+    );
+
+    cv::Mat distCoeffs = (cv::Mat1d(5,1) <<
+        -0.06023616996408216,
+        2.1682565145419943,
+        -0.034188391219249624,
+        0.0045726338185274121,
+        -10.253123727898847
+    ); **/
+
+
+    // ---- CAMERA INTRINSICS ----
+    // Default guess (will be overridden by YAML if available)
+    cv::Mat cameraMatrix = (cv::Mat1d(3,3) <<
+        1000, 0, frame.cols / 2.0,
+        0, 1000, frame.rows / 2.0,
+        0, 0, 1
+    );
+    cv::Mat distCoeffs = cv::Mat::zeros(1, 5, CV_64F);
+
+    // Try to load calibrated intrinsics
+    {
+        cv::FileStorage fs("camera_calibration.yml", cv::FileStorage::READ);
+        if (fs.isOpened()) {
+            std::cout << "[INFO] Loading camera_calibration.yml\n";
+            fs["camera_matrix"] >> cameraMatrix;
+            fs["distortion_coefficients"] >> distCoeffs;
+            fs.release();
+            std::cout << "cameraMatrix =\n" << cameraMatrix << "\n";
+            std::cout << "distCoeffs =\n" << distCoeffs << "\n";
+            std::cerr << "[DEBUG] Focal length X: " << cameraMatrix.at<double>(0,0) << "\n";
+            std::cerr << "[DEBUG] Focal length Y: " << cameraMatrix.at<double>(1,1) << "\n";
+            std::cerr << "[DEBUG] Principal point: (" << cameraMatrix.at<double>(0,2) << ", " << cameraMatrix.at<double>(1,2) << ")\n";
+            std::cerr << "[DEBUG] Image resolution used: " << frame.cols << "x" << frame.rows << "\n";
+        } else {
+            std::cout << "[WARN] Could not open camera_calibration.yml, using default intrinsics.\n";
+        }
+    }
+
+
+
+
 
     // main loop
     while (!glfwWindowShouldClose(window)) {
@@ -425,6 +517,108 @@ int main() {
             std::this_thread::sleep_for(std::chrono::milliseconds(3));
             continue;
         }
+
+        // ====== STAGE 1: DETECT MARKER ======
+        markerIds.clear();
+        markerCorners.clear();
+        cv::Ptr<cv::aruco::DetectorParameters> params = cv::makePtr<cv::aruco::DetectorParameters>();
+        params->cornerRefinementMethod   = cv::aruco::CORNER_REFINE_SUBPIX;
+        params->adaptiveThreshWinSizeMin = 3;
+        params->adaptiveThreshWinSizeMax = 23;
+        params->adaptiveThreshWinSizeStep= 10;
+        params->minMarkerPerimeterRate   = 0.03;
+        params->maxMarkerPerimeterRate   = 4.0;
+        cv::aruco::detectMarkers(frame, arucoDict, markerCorners, markerIds, params);
+        cv::aruco::drawDetectedMarkers(frame, markerCorners, markerIds);
+        if (!markerIds.empty()) {
+        std::cout << "[ARUCO] Detected " << markerIds.size() << " marker(s). IDs: ";
+        for (int id : markerIds) std::cout << id << " ";
+        std::cout << std::endl;
+    } else {
+        std::cout << "[ARUCO] No markers detected\n" << std::flush;
+    }
+
+        // ====== STAGE 2: ESTIMATE POSE ======
+        std::vector<cv::Vec3d> rvecs, tvecs;
+        bool markerDetected = false;
+
+        if (!markerIds.empty()) {
+            cv::aruco::estimatePoseSingleMarkers(
+                markerCorners,
+                0.10f,         // marker size in meters â€” 10cm physical marker
+                cameraMatrix,
+                distCoeffs,
+                rvecs,
+                tvecs
+            );
+            markerDetected = true;
+            // Draw axis on the frame for each marker
+    for (size_t i = 0; i < markerIds.size(); i++) {
+        cv::drawFrameAxes(frame, cameraMatrix, distCoeffs, rvecs[i], tvecs[i], 0.05f);
+    }
+
+
+        }
+        
+
+        // ====== STAGE 3: CONVERT POSE TO GL MODEL MATRIX ======
+        glm::mat4 cubeModel(1.0f);
+        std::cerr << "[STAGE3] Checking markerDetected\n" << std::flush;
+
+        if (markerDetected) {
+            std::cerr << "[STAGE3] INSIDE markerDetected block\n" << std::flush;
+
+            // ================= pose logging =================
+            static int poseFrame = 0;
+            poseCSV
+                << poseFrame++ << ","
+                << tvecs[0][0] << ","
+                << tvecs[0][1] << ","
+                << tvecs[0][2] << ","
+                << rvecs[0][0] << ","
+                << rvecs[0][1] << ","
+                << rvecs[0][2] << "\n";
+            // =================================================
+
+            // Rodrigues rotation vector → 3×3 rotation matrix
+            cv::Mat R;
+            cv::Rodrigues(rvecs[0], R);
+
+            // Build rotation matrix in column-major order (GLM)
+            glm::mat4 rotMatrix(1.0f);
+            for (int row = 0; row < 3; ++row) {
+                for (int col = 0; col < 3; ++col) {
+                    rotMatrix[col][row] = static_cast<float>(R.at<double>(row, col));
+                }
+            }
+
+            // Convert translation from OpenCV camera space to OpenGL world space
+            // OpenCV: X right, Y down, Z forward
+            // OpenGL: X right, Y up, Z forward (same direction for this camera setup)
+            // Only flip Y (down→up), keep Z direction the same
+            glm::vec3 t_cv(tvecs[0][0], tvecs[0][1], tvecs[0][2]);
+            glm::vec3 t_gl = glm::vec3(t_cv.x, -t_cv.y, t_cv.z);
+
+            // Add camera position to convert from camera space to world space
+            glm::vec3 cameraPos = glm::vec3(0.0f, 0.0f, -2.5f);
+            glm::vec3 markerWorldPos = cameraPos + t_gl;
+
+
+            // Flip the rotation: only Y axis needs flipping (down→up)
+            glm::mat4 flipRot = glm::scale(glm::mat4(1.0f), glm::vec3(1.0f, -1.0f, 1.0f));
+            glm::mat4 flippedRotMatrix = flipRot * rotMatrix * flipRot;
+
+            // Build final model matrix with corrected rotation and translation
+            cubeModel = glm::translate(glm::mat4(1.0f), markerWorldPos) * flippedRotMatrix;
+
+            cube->setVisible(true);
+            cube->setModelMatrix(cubeModel);
+        } 
+        else {
+            cube->setVisible(false);
+        }
+
+
 
         if (useGPU) {
             cv::flip(frame, frame, 0);
@@ -501,6 +695,7 @@ int main() {
     delete sinCityShader;
 
     glfwTerminate();
+    poseCSV.close();
     csv.close();
     return 0;
 }

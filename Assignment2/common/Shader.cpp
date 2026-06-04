@@ -146,11 +146,19 @@ Shader::~Shader(){
 	
 }
 
+
 void Shader::bind(){
 	
 	// Use our shader
 	glUseProgram(programID);
 	
+}
+
+void Shader::setMat4(const std::string &name, const glm::mat4 &mat) {
+    GLint loc = glGetUniformLocation(programID, name.c_str());
+    if (loc != -1) {
+        glUniformMatrix4fv(loc, 1, GL_FALSE, glm::value_ptr(mat));
+    }
 }
 
 void Shader::SetMVP(const glm::mat4& mvp) {

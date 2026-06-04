@@ -98,6 +98,12 @@ void Camera::setPosition(glm::vec3 pos){
                                      );
 }
 
+//! Set projection matrix
+/*!  Set custom projection matrix. */
+void Camera::setProjectionMatrix(glm::mat4 proj){
+    m_projectionMatrix = proj;
+}
+
 //! Update angles.
 /*!  Set after setting the angles the camera settings neeed to be updated. */
 void Camera::updateAngles(){
