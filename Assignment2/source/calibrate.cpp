@@ -23,9 +23,8 @@ static std::string executableDir() {
 
 int main() {
     // ---- Chessboard settings ----
-    // The board has boardWidth x boardHeight *internal* corners (one fewer than
-    // the number of squares in each direction). squareSize is the real-world
-    // edge length of a square; it sets the units of the calibration (metres here).
+    // The board has boardWidth x boardHeight internal corners. squareSize is the real-world
+    // edge length of a square.
     const int boardWidth = 9;
     const int boardHeight = 6;
     const float squareSize = 0.02f;  // 20 mm squares
@@ -51,10 +50,6 @@ int main() {
         return -1;
     }
 
-    // Calibrate at the SAME resolution Assignment2 captures at (1280x720).
-    // Intrinsics (focal length, principal point) are resolution-dependent, so a
-    // calibration done at the default 640x480 would be wrong when the AR app runs
-    // at 1280x720 - the cube's perspective/scale would be off by ~2x.
     cap.set(cv::CAP_PROP_FRAME_WIDTH, 1280);
     cap.set(cv::CAP_PROP_FRAME_HEIGHT, 720);
     cap.set(cv::CAP_PROP_FPS, 30);
@@ -68,7 +63,7 @@ int main() {
 
     cv::Mat frame, gray;
 
-    // ---- Capture loop: collect chessboard views ----
+    // - Capture loop: collect chessboard views -
     while (true) {
         cap >> frame;
         if (frame.empty()) break;
@@ -105,7 +100,7 @@ int main() {
         return -1;
     }
 
-    // ---- Solve for the intrinsics ----
+    // - Solve for the intrinsics -
     std::cout << "Running calibration..." << std::endl;
 
     cv::Mat cameraMatrix = cv::Mat::eye(3, 3, CV_64F);
@@ -126,9 +121,7 @@ int main() {
     std::cout << "Camera matrix:\n" << cameraMatrix << std::endl;
     std::cout << "Distortion coefficients:\n" << distCoeffs << std::endl;
 
-    // ---- Save ----
-    // Write next to this executable (e.g. build\Debug\camera_calibration.yml) so
-    // Assignment2.exe - which loads from its own folder - always picks it up.
+    // - Save -
     std::string ymlPath = executableDir() + "camera_calibration.yml";
     cv::FileStorage fs(ymlPath, cv::FileStorage::WRITE);
     fs << "camera_matrix" << cameraMatrix;

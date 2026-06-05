@@ -63,7 +63,7 @@ enum FilterType { FILTER_NONE, FILTER_PIXELATE, FILTER_SINCITY };
 FilterType activeFilter = FILTER_NONE;
 bool useGPU = true;
 
-// Set when the user presses 'T' to kick off the automated benchmark sweep. Legacy stuffff
+// Set when the user presses 'T' to kick off the automated benchmark sweep. Legacy stuffff, not in use.
 std::atomic<bool> batchRequested(false);
 std::atomic<bool> batchRunning(false);
 
@@ -375,7 +375,7 @@ void runBatchExperiments(
 
 // ============================== main ==============================
 int main() {
-    // ---- Camera ----
+    // - Camera -
     cv::VideoCapture cap(0);
     if (!cap.isOpened()) {
         cerr << "Error: could not open camera\n";
@@ -444,7 +444,7 @@ int main() {
     int frameCount = 0;
     auto startTime = chrono::high_resolution_clock::now();
 
-    // ---- ArUco setup ----
+    // - ArUco setup -
     cv::aruco::Dictionary arucoDictObj =
         cv::aruco::getPredefinedDictionary(cv::aruco::DICT_6X6_50);
     cv::Ptr<cv::aruco::Dictionary> arucoDict =
@@ -463,8 +463,8 @@ int main() {
     detectorParams->minMarkerPerimeterRate    = 0.03;
     detectorParams->maxMarkerPerimeterRate    = 4.0;
 
-    // ---- CAMERA INTRINSICS ----
-    // Default guess (will be overridden by YAML if available)
+    // - Camera intrinsics -
+    // Default guess (will be overridden by YAML, if available)
     cv::Mat cameraMatrix = (cv::Mat1d(3,3) <<
         1000, 0, frame.cols / 2.0,
         0, 1000, frame.rows / 2.0,
@@ -473,7 +473,7 @@ int main() {
     cv::Mat distCoeffs = cv::Mat::zeros(1, 5, CV_64F);
 
     // Try to load calibrated intrinsics.
-    // Prefer the camera_calibration.yml that sits next to this executable
+    // Prefer the camera_calibration.yml that sits next to this executable.
     {
         std::string ymlPath = executableDir() + "camera_calibration.yml";
         cv::FileStorage fs(ymlPath, cv::FileStorage::READ);
@@ -564,7 +564,7 @@ int main() {
             const float Hf = static_cast<float>(frame.rows);
             const float A  = 1.777f;   // must match aspectRatio in videoTextureShader.vert
 
-            // --- Pose [R|t] (OpenCV camera frame) as a GLM matrix ---
+            // - Pose [R|t] (OpenCV camera frame) as a GLM matrix -
             glm::mat4 RT(1.0f);
             for (int r = 0; r < 3; ++r) {
                 for (int c = 0; c < 3; ++c)
@@ -576,7 +576,7 @@ int main() {
             glm::mat4 G(1.0f);  G[1][1] = -1.0f;  G[2][2] = -1.0f;
             glm::mat4 MV = G * RT;
 
-            // --- OpenGL projection from the calibrated intrinsics ---
+            // - OpenGL projection from the calibrated intrinsics -
             const double fx = cameraMatrix.at<double>(0, 0);
             const double fy = cameraMatrix.at<double>(1, 1);
             const double cx = cameraMatrix.at<double>(0, 2);
@@ -591,32 +591,30 @@ int main() {
             P[2][3] = -1.0f;
             P[3][2] = -2.0f * farP * nearP / (farP - nearP);
 
-            // --- Fixed clip-space remap onto the displayed background ---
+            // - Fixed clip-space remap onto the displayed background -
             // The real camera projects a 3D point to image NDC (nx, ny). The
             // displayed background maps image pixel (px,py) to the world plane
-            // point (A*nx, ny, 0) (this is the SAME mapping that already centred
-            // the cube), which the scene camera then projects to screen. Because
-            // the plane z = 0 has constant view depth, that screen projection is
-            // an exact per-axis scale with no offset:
-            //     screen_ndc.x = ax * nx ,   screen_ndc.y = ay * ny
-            // ax, ay depend only on the (fixed) scene camera + quad, so we compute
-            // them once per frame from camVP - robust, no fragile least-squares.
+            // point (A*nx, ny, 0) Because the plane z = 0 has constant
+            // view depth, that screen projection is an exact per-axis
+            // scale with no offset: screen_ndc.x = ax * nx ,
+            // screen_ndc.y = ay * ny ax, ay depend only on the fixed scene camera
+            // + quad, so we compute them once per frame from camVP.
             const glm::mat4 camVP = cam->getViewProjectionMatrix();
             const glm::vec4 ex = camVP * glm::vec4(A, 0.0f, 0.0f, 1.0f);
             const glm::vec4 ey = camVP * glm::vec4(0.0f, 1.0f, 0.0f, 1.0f);
             const float ax = ex.x / ex.w;   // nx - screen ndc x
             const float ay = ey.y / ey.w;   // ny - screen ndc y
 
-            // Apply the scale in clip space (perspective preserved); keep the real
-            // depth (z) so the cube self-occludes correctly.
+            // Apply the scale in clip space; keep the real
+            // depth z so the cube self-occludes correctly.
             glm::mat4 S(1.0f);
             S[0][0] = ax;
             S[1][1] = ay;
             glm::mat4 P_screen = S * P;
 
-            // --- Cube model in the marker frame: centred, resting on the plane ---
-            const float Lm = 0.10f;          // marker side length (metres)
-            const float e  = Lm * 0.5f;      // cube edge = half the marker
+            // - Cube model in the marker frame: centred, resting on the plane -
+            const float Lm = 0.10f;          // marker side length
+            const float e  = Lm * 0.5f;      // cube edge is half the marker
             glm::mat4 cubeLocal =
                 glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, e * 0.5f)) *
                 glm::scale(glm::mat4(1.0f), glm::vec3(e));
@@ -631,7 +629,7 @@ int main() {
 
         // ====== STAGE 4: PROCESS & UPLOAD THE VIDEO FRAME ======
         if (useGPU) {
-            // GPU path: upload the raw frame and let the shader do the filtering;
+            // GPU path: upload the raw frame and let the shader do the filtering; 
             // the interactive pan/rotate/zoom is applied to the quad transform.
             cv::flip(frame, frame, 0);
             videoTexture->update(frame.data, frame.cols, frame.rows, true);
@@ -647,6 +645,7 @@ int main() {
         } else {
             // CPU path: apply the filter and the affine transform on the CPU, then
             // upload the result and draw it through an untransformed quad.
+            // Legacy code, but can still be used for assignment 3 pressing 'c'.
             cv::Mat processed;
             if (activeFilter == FILTER_PIXELATE) CPUFilters::pixelate(frame, processed, 10);
             else if (activeFilter == FILTER_SINCITY) CPUFilters::sinCity(frame, processed);
@@ -675,7 +674,7 @@ int main() {
         glfwSwapBuffers(window);
         glfwPollEvents();
 
-        // Report FPS roughly once per second.
+        // Report FPs once per second ish.
         ++frameCount;
         auto now = chrono::high_resolution_clock::now();
         double elapsed = chrono::duration<double>(now - startTime).count();
@@ -691,7 +690,7 @@ int main() {
         }
     }
 
-    // ---- Cleanup ----
+    // - Cleanup - old stuff, just scared to delete.
     cap.release();
 
     delete videoTexture;
