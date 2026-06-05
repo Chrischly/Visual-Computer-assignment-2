@@ -1,6 +1,25 @@
 #include <opencv2/opencv.hpp>
 #include <iostream>
 #include <vector>
+#include <string>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
+// Directory containing the running executable (with trailing separator).
+static std::string executableDir() {
+#ifdef _WIN32
+    char buf[MAX_PATH] = {0};
+    DWORD n = GetModuleFileNameA(nullptr, buf, MAX_PATH);
+    if (n > 0 && n < MAX_PATH) {
+        std::string path(buf, n);
+        size_t slash = path.find_last_of("\\/");
+        if (slash != std::string::npos) return path.substr(0, slash + 1);
+    }
+#endif
+    return std::string();
+}
 
 int main() {
     // --- Chessboard settings ---
@@ -27,7 +46,18 @@ int main() {
         return -1;
     }
 
+    // Calibrate at the SAME resolution Assignment2 captures at (1280x720).
+    // Intrinsics (focal length, principal point) are resolution-dependent, so a
+    // calibration done at the default 640x480 would be wrong when the AR app runs
+    // at 1280x720 — the cube's perspective/scale would be off by ~2x.
+    cap.set(cv::CAP_PROP_FRAME_WIDTH, 1280);
+    cap.set(cv::CAP_PROP_FRAME_HEIGHT, 720);
+    cap.set(cv::CAP_PROP_FPS, 30);
+
     std::cout << "Calibration started." << std::endl;
+    std::cout << "Capture resolution: "
+              << (int)cap.get(cv::CAP_PROP_FRAME_WIDTH) << "x"
+              << (int)cap.get(cv::CAP_PROP_FRAME_HEIGHT) << std::endl;
     std::cout << "Press SPACE to capture frame with detected chessboard." << std::endl;
     std::cout << "Press ESC to finish and compute calibration." << std::endl;
 
@@ -89,12 +119,15 @@ int main() {
     std::cout << "Distortion coefficients:\n" << distCoeffs << std::endl;
 
     // Save to file
-    cv::FileStorage fs("camera_calibration.yml", cv::FileStorage::WRITE);
+    // Save next to this executable (e.g. build\Debug\camera_calibration.yml) so
+    // Assignment2.exe — which loads from its own folder — always picks it up.
+    std::string ymlPath = executableDir() + "camera_calibration.yml";
+    cv::FileStorage fs(ymlPath, cv::FileStorage::WRITE);
     fs << "camera_matrix" << cameraMatrix;
     fs << "distortion_coefficients" << distCoeffs;
     fs.release();
 
-    std::cout << "Saved calibration to camera_calibration.yml" << std::endl;
+    std::cout << "Saved calibration to " << ymlPath << std::endl;
 
     return 0;
 }

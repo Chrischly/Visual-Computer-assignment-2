@@ -86,14 +86,22 @@ void Cube::render(Camera* camera) {
     // Model matrix: override if pose comes from AR marker
     glm::mat4 model = modelMatrix;
 
-    // Camera matrices
-    glm::mat4 view  = camera->getViewMatrix();
-    glm::mat4 proj  = camera->getProjectionMatrix();
+    // Camera matrices: use the AR intrinsic projection/view when overridden so
+    // the cube matches the real camera, otherwise fall back to the scene camera.
+    glm::mat4 view  = hasOverride ? overrideView       : camera->getViewMatrix();
+    glm::mat4 proj  = hasOverride ? overrideProjection : camera->getProjectionMatrix();
 
     // Send all matrices to your shader
     shader->setMat4("model", model);
     shader->setMat4("view",  view);
     shader->setMat4("projection", proj);
+
+    // When driven by the AR pose, the cube uses an intrinsic projection whose
+    // depth range differs from the scene camera that drew the background quad,
+    // so the quad's depth could otherwise occlude ("swallow") the cube. Clear
+    // the depth buffer first so the cube is always drawn on top of the video,
+    // while still depth-testing against itself for correct face occlusion.
+    if (hasOverride) glClear(GL_DEPTH_BUFFER_BIT);
 
     // Draw cube
     glBindVertexArray(VAO);

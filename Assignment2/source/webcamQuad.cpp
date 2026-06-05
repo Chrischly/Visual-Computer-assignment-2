@@ -26,6 +26,25 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/matrix_decompose.hpp>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
+// Returns the directory that contains the running executable (e.g. build\Debug),
+// with a trailing separator. Falls back to "" (current dir) if it can't be found.
+static std::string executableDir() {
+#ifdef _WIN32
+    char buf[MAX_PATH] = {0};
+    DWORD n = GetModuleFileNameA(nullptr, buf, MAX_PATH);
+    if (n > 0 && n < MAX_PATH) {
+        std::string path(buf, n);
+        size_t slash = path.find_last_of("\\/");
+        if (slash != std::string::npos) return path.substr(0, slash + 1);
+    }
+#endif
+    return std::string();
+}
+
 using namespace std;
 
 // ---------------------- Globals ----------------------
@@ -404,11 +423,8 @@ int main() {
     Quad* quad = new Quad((float)frame.cols / (float)frame.rows);
     quad->setShader(defaultShader);
     scene->addObject(quad);
-    //--------------------------------------
-    // CREATE 3D CUBE FOR AR OVERLAY
-    //--------------------------------------
     Cube* cube = new Cube();
-    cube->setScale(glm::vec3(0.05f));   // Scale cube to 5cm (half of 10cm marker)
+    cube->setScale(glm::vec3(0.02f));   // Scale cube to 5cm (half of 10cm marker)
     cube->setVisible(false);            // hidden until a marker is detected
     Shader* simple3DShader = new Shader("cube.vert", "cube.frag"); // or use existing shader
     cube->setShader(new Shader("cube.vert", "cube.frag"));
@@ -475,11 +491,20 @@ csv << "Frame,Backend,Filter,FPS\n";
     );
     cv::Mat distCoeffs = cv::Mat::zeros(1, 5, CV_64F);
 
-    // Try to load calibrated intrinsics
+    // Try to load calibrated intrinsics.
+    // Prefer the camera_calibration.yml that sits next to this executable
+    // (e.g. build\Debug\camera_calibration.yml — the exact file CalibrateCam.exe
+    // writes when run from build\Debug). Fall back to the current directory so it
+    // still works when launched with cwd set to the project folder.
     {
-        cv::FileStorage fs("camera_calibration.yml", cv::FileStorage::READ);
+        std::string ymlPath = executableDir() + "camera_calibration.yml";
+        cv::FileStorage fs(ymlPath, cv::FileStorage::READ);
+        if (!fs.isOpened()) {
+            ymlPath = "camera_calibration.yml";
+            fs.open(ymlPath, cv::FileStorage::READ);
+        }
         if (fs.isOpened()) {
-            std::cout << "[INFO] Loading camera_calibration.yml\n";
+            std::cout << "[INFO] Loading " << ymlPath << "\n";
             fs["camera_matrix"] >> cameraMatrix;
             fs["distortion_coefficients"] >> distCoeffs;
             fs.release();
@@ -580,39 +605,84 @@ csv << "Frame,Backend,Filter,FPS\n";
                 << rvecs[0][2] << "\n";
             // =================================================
 
-            // Rodrigues rotation vector → 3×3 rotation matrix
+            // Rodrigues rotation vector → 3×3 rotation matrix (marker pose in
+            // the OpenCV camera frame: X right, Y down, Z forward into scene).
             cv::Mat R;
             cv::Rodrigues(rvecs[0], R);
 
-            // Build rotation matrix in column-major order (GLM)
-            glm::mat4 rotMatrix(1.0f);
-            for (int row = 0; row < 3; ++row) {
-                for (int col = 0; col < 3; ++col) {
-                    rotMatrix[col][row] = static_cast<float>(R.at<double>(row, col));
-                }
+            // =================================================================
+            //  PROPER AR RENDERING
+            // -----------------------------------------------------------------
+            //  Render the cube with a projection built from the calibrated
+            //  intrinsics and a modelview from the SAME rvec/tvec that draw the
+            //  (correct) axes, so the cube's perspective/tilt matches the video
+            //  background. A fixed per-axis clip-space scale then maps the real
+            //  camera's NDC onto the displayed (flipped/mirrored) background.
+            // =================================================================
+            const float Wf = static_cast<float>(frame.cols);
+            const float Hf = static_cast<float>(frame.rows);
+            const float A  = 1.777f;   // must match aspectRatio in videoTextureShader.vert
+
+            // --- Pose [R|t] (OpenCV camera frame) as a GLM matrix ---
+            glm::mat4 RT(1.0f);
+            for (int r = 0; r < 3; ++r) {
+                for (int c = 0; c < 3; ++c)
+                    RT[c][r] = static_cast<float>(R.at<double>(r, c));
+                RT[3][r] = static_cast<float>(tvecs[0][r]);
             }
+            // OpenCV camera (X right, Y down, Z forward) → OpenGL camera
+            // (X right, Y up, looking down −Z):  multiply by diag(1,−1,−1).
+            glm::mat4 G(1.0f);  G[1][1] = -1.0f;  G[2][2] = -1.0f;
+            glm::mat4 MV = G * RT;
 
-            // Convert translation from OpenCV camera space to OpenGL world space
-            // OpenCV: X right, Y down, Z forward
-            // OpenGL: X right, Y up, Z forward (same direction for this camera setup)
-            // Only flip Y (down→up), keep Z direction the same
-            glm::vec3 t_cv(tvecs[0][0], tvecs[0][1], tvecs[0][2]);
-            glm::vec3 t_gl = glm::vec3(t_cv.x, -t_cv.y, t_cv.z);
+            // --- OpenGL projection from the calibrated intrinsics ---
+            const double fx = cameraMatrix.at<double>(0, 0);
+            const double fy = cameraMatrix.at<double>(1, 1);
+            const double cx = cameraMatrix.at<double>(0, 2);
+            const double cy = cameraMatrix.at<double>(1, 2);
+            const float nearP = 0.01f, farP = 100.0f;
+            glm::mat4 P(0.0f);
+            P[0][0] = 2.0f * static_cast<float>(fx) / Wf;
+            P[1][1] = 2.0f * static_cast<float>(fy) / Hf;
+            P[2][0] = 1.0f - 2.0f * static_cast<float>(cx) / Wf;
+            P[2][1] = 2.0f * static_cast<float>(cy) / Hf - 1.0f;
+            P[2][2] = -(farP + nearP) / (farP - nearP);
+            P[2][3] = -1.0f;
+            P[3][2] = -2.0f * farP * nearP / (farP - nearP);
 
-            // Add camera position to convert from camera space to world space
-            glm::vec3 cameraPos = glm::vec3(0.0f, 0.0f, -2.5f);
-            glm::vec3 markerWorldPos = cameraPos + t_gl;
+            // --- Fixed clip-space remap onto the displayed background ---
+            // The real camera projects a 3D point to image NDC (nx, ny). The
+            // displayed background maps image pixel (px,py) to the world plane
+            // point (A*nx, ny, 0) (this is the SAME mapping that already centred
+            // the cube), which the scene camera then projects to screen. Because
+            // the plane z = 0 has constant view depth, that screen projection is
+            // an exact per-axis scale with no offset:
+            //     screen_ndc.x = ax * nx ,   screen_ndc.y = ay * ny
+            // ax, ay depend only on the (fixed) scene camera + quad, so we compute
+            // them once per frame from camVP — robust, no fragile least-squares.
+            const glm::mat4 camVP = cam->getViewProjectionMatrix();
+            const glm::vec4 ex = camVP * glm::vec4(A, 0.0f, 0.0f, 1.0f);
+            const glm::vec4 ey = camVP * glm::vec4(0.0f, 1.0f, 0.0f, 1.0f);
+            const float ax = ex.x / ex.w;   // nx → screen ndc x
+            const float ay = ey.y / ey.w;   // ny → screen ndc y
 
+            // Apply the scale in clip space (perspective preserved); keep the real
+            // depth (z) so the cube self-occludes correctly.
+            glm::mat4 S(1.0f);
+            S[0][0] = ax;
+            S[1][1] = ay;
+            glm::mat4 P_screen = S * P;
 
-            // Flip the rotation: only Y axis needs flipping (down→up)
-            glm::mat4 flipRot = glm::scale(glm::mat4(1.0f), glm::vec3(1.0f, -1.0f, 1.0f));
-            glm::mat4 flippedRotMatrix = flipRot * rotMatrix * flipRot;
-
-            // Build final model matrix with corrected rotation and translation
-            cubeModel = glm::translate(glm::mat4(1.0f), markerWorldPos) * flippedRotMatrix;
+            // --- Cube model in the marker frame: centred, resting on the plane ---
+            const float Lm = 0.10f;          // marker side length (metres)
+            const float e  = Lm * 0.5f;      // cube edge = half the marker
+            glm::mat4 cubeLocal =
+                glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, e * 0.5f)) *
+                glm::scale(glm::mat4(1.0f), glm::vec3(e));
 
             cube->setVisible(true);
-            cube->setModelMatrix(cubeModel);
+            cube->setScale(glm::vec3(1.0f));   // scale is baked into cubeLocal
+            cube->setAROverride(cubeLocal, MV, P_screen);
         } 
         else {
             cube->setVisible(false);
