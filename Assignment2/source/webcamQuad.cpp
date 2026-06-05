@@ -433,13 +433,16 @@ int main() {
     cube->setShader(new Shader("cube.vert", "cube.frag"));
     scene->addObject(cube);
 
-    // Interactive FPS logging.
-    std::ofstream csv("fps_log.csv");
+    // Interactive FPS logging. Written next to the executable (not the current
+    // working directory) so the file always lands in a predictable place.
+    std::ofstream csv(executableDir() + "fps_log.csv");
     csv << "Frame,Backend,Filter,FPS\n";
+    csv.flush();
 
-    // Per-frame marker pose logging.
-    std::ofstream poseCSV("pose_log.csv");
+    // Per-frame marker pose logging (same executable-relative location).
+    std::ofstream poseCSV(executableDir() + "pose_log.csv");
     poseCSV << "frame,tx,ty,tz,rx,ry,rz\n";
+    poseCSV.flush();
 
     int frameCount = 0;
     auto startTime = chrono::high_resolution_clock::now();
@@ -552,6 +555,7 @@ int main() {
             poseCSV << poseFrame++ << ","
                     << tvecs[0][0] << "," << tvecs[0][1] << "," << tvecs[0][2] << ","
                     << rvecs[0][0] << "," << rvecs[0][1] << "," << rvecs[0][2] << "\n";
+            poseCSV.flush();
 
             // Rodrigues rotation vector -> 3x3 rotation matrix
             cv::Mat R;
@@ -681,6 +685,7 @@ int main() {
         if (elapsed >= 1.0) {
             double fps = frameCount / elapsed;
             csv << frameCount << "," << (useGPU ? "GPU" : "CPU") << "," << activeFilter << "," << fps << "\n";
+            csv.flush();
             frameCount = 0;
             startTime = now;
             cout << "[MAIN] FPS: " << fixed << setprecision(2) << fps
