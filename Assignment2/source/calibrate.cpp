@@ -22,14 +22,18 @@ static std::string executableDir() {
 }
 
 int main() {
-    // --- Chessboard settings ---
-    const int boardWidth = 9;        // internal corners
+    // ---- Chessboard settings ----
+    // The board has boardWidth x boardHeight *internal* corners (one fewer than
+    // the number of squares in each direction). squareSize is the real-world
+    // edge length of a square; it sets the units of the calibration (metres here).
+    const int boardWidth = 9;
     const int boardHeight = 6;
-    const float squareSize = 0.02f;  // meters (20 mm)
+    const float squareSize = 0.02f;  // 20 mm squares
 
     cv::Size patternSize(boardWidth, boardHeight);
 
-    // Prepare object points (0,0,0), (1,0,0), ...
+    // One set of 3D object points for the board, laid out on the z = 0 plane.
+    // The same set is reused for every captured view.
     std::vector<cv::Point3f> objp;
     for (int i = 0; i < boardHeight; i++) {
         for (int j = 0; j < boardWidth; j++) {
@@ -37,9 +41,10 @@ int main() {
         }
     }
 
-    std::vector<std::vector<cv::Point3f>> objectPoints;  // 3D points in world space
-    std::vector<std::vector<cv::Point2f>> imagePoints;   // 2D detected corners
+    std::vector<std::vector<cv::Point3f>> objectPoints;  // 3D board points per view
+    std::vector<std::vector<cv::Point2f>> imagePoints;   // detected 2D corners per view
 
+    // ---- Camera ----
     cv::VideoCapture cap(0);
     if (!cap.isOpened()) {
         std::cout << "Could not open webcam!" << std::endl;
@@ -49,7 +54,7 @@ int main() {
     // Calibrate at the SAME resolution Assignment2 captures at (1280x720).
     // Intrinsics (focal length, principal point) are resolution-dependent, so a
     // calibration done at the default 640x480 would be wrong when the AR app runs
-    // at 1280x720 — the cube's perspective/scale would be off by ~2x.
+    // at 1280x720 - the cube's perspective/scale would be off by ~2x.
     cap.set(cv::CAP_PROP_FRAME_WIDTH, 1280);
     cap.set(cv::CAP_PROP_FRAME_HEIGHT, 720);
     cap.set(cv::CAP_PROP_FPS, 30);
@@ -58,11 +63,12 @@ int main() {
     std::cout << "Capture resolution: "
               << (int)cap.get(cv::CAP_PROP_FRAME_WIDTH) << "x"
               << (int)cap.get(cv::CAP_PROP_FRAME_HEIGHT) << std::endl;
-    std::cout << "Press SPACE to capture frame with detected chessboard." << std::endl;
-    std::cout << "Press ESC to finish and compute calibration." << std::endl;
+    std::cout << "Press SPACE to capture a frame with a detected chessboard." << std::endl;
+    std::cout << "Press ESC to finish and compute the calibration." << std::endl;
 
     cv::Mat frame, gray;
 
+    // ---- Capture loop: collect chessboard views ----
     while (true) {
         cap >> frame;
         if (frame.empty()) break;
@@ -74,6 +80,7 @@ int main() {
                     cv::CALIB_CB_ADAPTIVE_THRESH | cv::CALIB_CB_FAST_CHECK | cv::CALIB_CB_NORMALIZE_IMAGE);
 
         if (found) {
+            // Refine corner locations to sub-pixel accuracy for a better fit.
             cv::cornerSubPix(gray, corners, cv::Size(11, 11), cv::Size(-1, -1),
                              cv::TermCriteria(cv::TermCriteria::EPS + cv::TermCriteria::MAX_ITER, 30, 0.001));
 
@@ -83,10 +90,10 @@ int main() {
         cv::imshow("Calibration", frame);
         int key = cv::waitKey(1);
 
-        if (key == 27) { // ESC → finish calibration
+        if (key == 27) {                       // ESC: finish and calibrate
             break;
-        } 
-        else if (key == ' ' && found) { // SPACE → save frame
+        }
+        else if (key == ' ' && found) {        // SPACE: keep this view
             imagePoints.push_back(corners);
             objectPoints.push_back(objp);
             std::cout << "Captured frame (" << imagePoints.size() << " samples)." << std::endl;
@@ -98,6 +105,7 @@ int main() {
         return -1;
     }
 
+    // ---- Solve for the intrinsics ----
     std::cout << "Running calibration..." << std::endl;
 
     cv::Mat cameraMatrix = cv::Mat::eye(3, 3, CV_64F);
@@ -118,9 +126,9 @@ int main() {
     std::cout << "Camera matrix:\n" << cameraMatrix << std::endl;
     std::cout << "Distortion coefficients:\n" << distCoeffs << std::endl;
 
-    // Save to file
-    // Save next to this executable (e.g. build\Debug\camera_calibration.yml) so
-    // Assignment2.exe — which loads from its own folder — always picks it up.
+    // ---- Save ----
+    // Write next to this executable (e.g. build\Debug\camera_calibration.yml) so
+    // Assignment2.exe - which loads from its own folder - always picks it up.
     std::string ymlPath = executableDir() + "camera_calibration.yml";
     cv::FileStorage fs(ymlPath, cv::FileStorage::WRITE);
     fs << "camera_matrix" << cameraMatrix;

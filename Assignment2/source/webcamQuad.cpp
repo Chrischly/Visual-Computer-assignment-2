@@ -47,7 +47,9 @@ static std::string executableDir() {
 
 using namespace std;
 
-// ---------------------- Globals ----------------------
+// ============================ Global state ============================
+// Window handle and the interactive transform/filter state driven by the
+// keyboard and mouse callbacks below.
 GLFWwindow* window = nullptr;
 
 float rotateAngle = 0.0f;
@@ -61,10 +63,12 @@ enum FilterType { FILTER_NONE, FILTER_PIXELATE, FILTER_SINCITY };
 FilterType activeFilter = FILTER_NONE;
 bool useGPU = true;
 
+// Set when the user presses 'T' to kick off the automated benchmark sweep. Legacy stuffff
 std::atomic<bool> batchRequested(false);
 std::atomic<bool> batchRunning(false);
 
 
+// Spins the camera until it returns a non-empty frame
 bool warmupCamera(cv::VideoCapture &cap, const int maxAttempts = 80, int msBetween = 15) {
     cv::Mat tmp;
     for (int i = 0; i < maxAttempts; ++i) {
@@ -98,7 +102,7 @@ bool keyPressedOnce(int key) {
     return now && !was;
 }
 
-// -- Window + Input --
+// - Window + Input -
 bool initWindow(const std::string& name) {
     if (!glfwInit()) {
         std::cerr << "Failed to initialize GLFW\n";
@@ -180,7 +184,7 @@ void processInput() {
     }
 }
 
-// -- Batch experiments --
+// - Batch experiments - assignment2 legacy code
 // Runs a set of experiments, logs averaged FPS per run to a experiments.csv file.
 void runBatchExperiments(
     cv::VideoCapture &cap,
@@ -369,22 +373,22 @@ void runBatchExperiments(
     batchRunning = false;
 }
 
-// ---------------------- main ----------------------
+// ============================== main ==============================
 int main() {
-    // open camera
+    // ---- Camera ----
     cv::VideoCapture cap(0);
     if (!cap.isOpened()) {
         cerr << "Error: could not open camera\n";
         return -1;
     }
 
-    // 
+    
     cap.set(cv::CAP_PROP_FRAME_WIDTH, 1280);
     cap.set(cv::CAP_PROP_FRAME_HEIGHT, 720);
     cap.set(cv::CAP_PROP_FPS, 30);
 
     if (!warmupCamera(cap, 80, 15)) {
-        cerr << "[WARN] Camera warmup failed to get frames quickly â€” continuing anyway\n";
+        cerr << "[WARN] Camera warmup failed to get frames quickly - continuing anyway\n";
     }
 
     if (!initWindow("Video Processing")) return -1;
@@ -393,7 +397,7 @@ int main() {
     glEnable(GL_DEPTH_TEST);
     GLuint VAO; glGenVertexArrays(1, &VAO); glBindVertexArray(VAO);
 
-    // Capture first frame
+    // Grab the first frame so resources can be sized to the camera resolution.
     cv::Mat frame;
     if (!grabSafeFrame(cap, frame)) {
         cerr << "Error: could not capture initial frame\n";
@@ -401,17 +405,14 @@ int main() {
         glfwTerminate();
         return -1;
     }
-
     cv::flip(frame, frame, 0);
 
-    // Create resources
+    //  Scene resources 
     Texture* videoTexture = new Texture(frame.data, frame.cols, frame.rows, true);
 
-    TextureShader* defaultShader = new TextureShader("videoTextureShader.vert", "videoTextureShader.frag");
+    TextureShader* defaultShader  = new TextureShader("videoTextureShader.vert", "videoTextureShader.frag");
     TextureShader* pixelateShader = new TextureShader("videoTextureShader.vert", "pixelate.frag");
     TextureShader* sinCityShader  = new TextureShader("videoTextureShader.vert", "sincity.frag");
-    
-
     defaultShader->setTexture(videoTexture);
     pixelateShader->setTexture(videoTexture);
     sinCityShader->setTexture(videoTexture);
@@ -423,64 +424,44 @@ int main() {
     Quad* quad = new Quad((float)frame.cols / (float)frame.rows);
     quad->setShader(defaultShader);
     scene->addObject(quad);
+
+    // The AR cube. It stays hidden until a marker is detected, at which point
+    // its transform is driven every frame by the marker pose
     Cube* cube = new Cube();
-    cube->setScale(glm::vec3(0.02f));   // Scale cube to 5cm (half of 10cm marker)
-    cube->setVisible(false);            // hidden until a marker is detected
-    Shader* simple3DShader = new Shader("cube.vert", "cube.frag"); // or use existing shader
+    cube->setScale(glm::vec3(0.02f));
+    cube->setVisible(false);
     cube->setShader(new Shader("cube.vert", "cube.frag"));
     scene->addObject(cube);
 
-
-    
-    // Interactive FPS logging CSV
+    // Interactive FPS logging.
     std::ofstream csv("fps_log.csv");
-csv << "Frame,Backend,Filter,FPS\n";
+    csv << "Frame,Backend,Filter,FPS\n";
 
-    // ---- POSE LOGGING CSV ----
+    // Per-frame marker pose logging.
     std::ofstream poseCSV("pose_log.csv");
     poseCSV << "frame,tx,ty,tz,rx,ry,rz\n";
 
     int frameCount = 0;
     auto startTime = chrono::high_resolution_clock::now();
 
-    // ---- ARUCO SETUP ----
+    // ---- ArUco setup ----
     cv::aruco::Dictionary arucoDictObj =
-    cv::aruco::getPredefinedDictionary(cv::aruco::DICT_6X6_50);
-
-    cv::Ptr<cv::aruco::Dictionary> arucoDict = 
-    cv::makePtr<cv::aruco::Dictionary>(arucoDictObj);
-
-
-
+        cv::aruco::getPredefinedDictionary(cv::aruco::DICT_6X6_50);
+    cv::Ptr<cv::aruco::Dictionary> arucoDict =
+        cv::makePtr<cv::aruco::Dictionary>(arucoDictObj);
 
     std::vector<int> markerIds;
     std::vector<std::vector<cv::Point2f>> markerCorners;
 
-    /** STANDARD CAMERA INTRINSICS â€” REPLACE WITH CALIBRATED VALUES FOR BEST RESULTS
-    cv::Mat cameraMatrix = (cv::Mat1d(3,3) <<
-    1000, 0, frame.cols/2,
-    0, 1000, frame.rows/2,
-    0, 0, 1
-    );
-
-    cv::Mat distCoeffs = cv::Mat::zeros(1, 5, CV_64F); 
-
-
-    // My calibrated camera intrinsics:
-    cv::Mat cameraMatrix = (cv::Mat1d(3,3) <<
-        833.77442760678105, 0.0, 311.2045296538675,
-        0.0, 837.7048165040502, 186.13605911537414,
-        0.0, 0.0, 1.0
-    );
-
-    cv::Mat distCoeffs = (cv::Mat1d(5,1) <<
-        -0.06023616996408216,
-        2.1682565145419943,
-        -0.034188391219249624,
-        0.0045726338185274121,
-        -10.253123727898847
-    ); **/
-
+    // Detector tuning. Built once and reused every frame.
+    cv::Ptr<cv::aruco::DetectorParameters> detectorParams =
+        cv::makePtr<cv::aruco::DetectorParameters>();
+    detectorParams->cornerRefinementMethod    = cv::aruco::CORNER_REFINE_SUBPIX;
+    detectorParams->adaptiveThreshWinSizeMin  = 3;
+    detectorParams->adaptiveThreshWinSizeMax  = 23;
+    detectorParams->adaptiveThreshWinSizeStep = 10;
+    detectorParams->minMarkerPerimeterRate    = 0.03;
+    detectorParams->maxMarkerPerimeterRate    = 4.0;
 
     // ---- CAMERA INTRINSICS ----
     // Default guess (will be overridden by YAML if available)
@@ -493,9 +474,6 @@ csv << "Frame,Backend,Filter,FPS\n";
 
     // Try to load calibrated intrinsics.
     // Prefer the camera_calibration.yml that sits next to this executable
-    // (e.g. build\Debug\camera_calibration.yml — the exact file CalibrateCam.exe
-    // writes when run from build\Debug). Fall back to the current directory so it
-    // still works when launched with cwd set to the project folder.
     {
         std::string ymlPath = executableDir() + "camera_calibration.yml";
         cv::FileStorage fs(ymlPath, cv::FileStorage::READ);
@@ -504,16 +482,16 @@ csv << "Frame,Backend,Filter,FPS\n";
             fs.open(ymlPath, cv::FileStorage::READ);
         }
         if (fs.isOpened()) {
-            std::cout << "[INFO] Loading " << ymlPath << "\n";
             fs["camera_matrix"] >> cameraMatrix;
             fs["distortion_coefficients"] >> distCoeffs;
             fs.release();
-            std::cout << "cameraMatrix =\n" << cameraMatrix << "\n";
-            std::cout << "distCoeffs =\n" << distCoeffs << "\n";
-            std::cerr << "[DEBUG] Focal length X: " << cameraMatrix.at<double>(0,0) << "\n";
-            std::cerr << "[DEBUG] Focal length Y: " << cameraMatrix.at<double>(1,1) << "\n";
-            std::cerr << "[DEBUG] Principal point: (" << cameraMatrix.at<double>(0,2) << ", " << cameraMatrix.at<double>(1,2) << ")\n";
-            std::cerr << "[DEBUG] Image resolution used: " << frame.cols << "x" << frame.rows << "\n";
+            std::cout << "[INFO] Loaded " << ymlPath << "\n";
+            std::cout << "[INFO] Focal length: ("
+                      << cameraMatrix.at<double>(0,0) << ", "
+                      << cameraMatrix.at<double>(1,1) << "), principal point: ("
+                      << cameraMatrix.at<double>(0,2) << ", "
+                      << cameraMatrix.at<double>(1,2) << ") at "
+                      << frame.cols << "x" << frame.rows << "\n";
         } else {
             std::cout << "[WARN] Could not open camera_calibration.yml, using default intrinsics.\n";
         }
@@ -523,21 +501,18 @@ csv << "Frame,Backend,Filter,FPS\n";
 
 
 
-    // main loop
+    // ============================ Main loop ============================
     while (!glfwWindowShouldClose(window)) {
         processInput();
 
-        // If user requested a batch and none is running, run it
+        // Run the benchmark sweep
         if (batchRequested.exchange(false) && !batchRunning.load()) {
-            // run batch in-line 
             runBatchExperiments(cap, videoTexture, quad, scene, cam,
                                 defaultShader, pixelateShader, sinCityShader);
-            // continue;
         }
 
-        // Grab safe frame
+        // Grab a valid frame; skip the iteration if the camera hiccups.
         if (!grabSafeFrame(cap, frame)) {
-            // If no valid frame, let events happen and continue
             glfwPollEvents();
             std::this_thread::sleep_for(std::chrono::milliseconds(3));
             continue;
@@ -546,22 +521,8 @@ csv << "Frame,Backend,Filter,FPS\n";
         // ====== STAGE 1: DETECT MARKER ======
         markerIds.clear();
         markerCorners.clear();
-        cv::Ptr<cv::aruco::DetectorParameters> params = cv::makePtr<cv::aruco::DetectorParameters>();
-        params->cornerRefinementMethod   = cv::aruco::CORNER_REFINE_SUBPIX;
-        params->adaptiveThreshWinSizeMin = 3;
-        params->adaptiveThreshWinSizeMax = 23;
-        params->adaptiveThreshWinSizeStep= 10;
-        params->minMarkerPerimeterRate   = 0.03;
-        params->maxMarkerPerimeterRate   = 4.0;
-        cv::aruco::detectMarkers(frame, arucoDict, markerCorners, markerIds, params);
+        cv::aruco::detectMarkers(frame, arucoDict, markerCorners, markerIds, detectorParams);
         cv::aruco::drawDetectedMarkers(frame, markerCorners, markerIds);
-        if (!markerIds.empty()) {
-        std::cout << "[ARUCO] Detected " << markerIds.size() << " marker(s). IDs: ";
-        for (int id : markerIds) std::cout << id << " ";
-        std::cout << std::endl;
-    } else {
-        std::cout << "[ARUCO] No markers detected\n" << std::flush;
-    }
 
         // ====== STAGE 2: ESTIMATE POSE ======
         std::vector<cv::Vec3d> rvecs, tvecs;
@@ -570,55 +531,35 @@ csv << "Frame,Backend,Filter,FPS\n";
         if (!markerIds.empty()) {
             cv::aruco::estimatePoseSingleMarkers(
                 markerCorners,
-                0.10f,         // marker size in meters â€” 10cm physical marker
+                0.10f,         // marker side length in metres
                 cameraMatrix,
                 distCoeffs,
                 rvecs,
                 tvecs
             );
             markerDetected = true;
-            // Draw axis on the frame for each marker
-    for (size_t i = 0; i < markerIds.size(); i++) {
-        cv::drawFrameAxes(frame, cameraMatrix, distCoeffs, rvecs[i], tvecs[i], 0.05f);
-    }
 
-
+            // Draw the OpenCV axes for each marker straight onto the frame.
+            for (size_t i = 0; i < markerIds.size(); i++) {
+                cv::drawFrameAxes(frame, cameraMatrix, distCoeffs, rvecs[i], tvecs[i], 0.05f);
+            }
         }
-        
 
         // ====== STAGE 3: CONVERT POSE TO GL MODEL MATRIX ======
-        glm::mat4 cubeModel(1.0f);
-        std::cerr << "[STAGE3] Checking markerDetected\n" << std::flush;
-
         if (markerDetected) {
-            std::cerr << "[STAGE3] INSIDE markerDetected block\n" << std::flush;
-
-            // ================= pose logging =================
+            // Log the raw pose for debugging / plots.
             static int poseFrame = 0;
-            poseCSV
-                << poseFrame++ << ","
-                << tvecs[0][0] << ","
-                << tvecs[0][1] << ","
-                << tvecs[0][2] << ","
-                << rvecs[0][0] << ","
-                << rvecs[0][1] << ","
-                << rvecs[0][2] << "\n";
-            // =================================================
+            poseCSV << poseFrame++ << ","
+                    << tvecs[0][0] << "," << tvecs[0][1] << "," << tvecs[0][2] << ","
+                    << rvecs[0][0] << "," << rvecs[0][1] << "," << rvecs[0][2] << "\n";
 
-            // Rodrigues rotation vector → 3×3 rotation matrix (marker pose in
-            // the OpenCV camera frame: X right, Y down, Z forward into scene).
+            // Rodrigues rotation vector -> 3x3 rotation matrix
             cv::Mat R;
             cv::Rodrigues(rvecs[0], R);
 
-            // =================================================================
-            //  PROPER AR RENDERING
-            // -----------------------------------------------------------------
+            
             //  Render the cube with a projection built from the calibrated
-            //  intrinsics and a modelview from the SAME rvec/tvec that draw the
-            //  (correct) axes, so the cube's perspective/tilt matches the video
-            //  background. A fixed per-axis clip-space scale then maps the real
-            //  camera's NDC onto the displayed (flipped/mirrored) background.
-            // =================================================================
+            //  intrinsics and a modelview from the SAME rvec/tvec that draw the axes
             const float Wf = static_cast<float>(frame.cols);
             const float Hf = static_cast<float>(frame.rows);
             const float A  = 1.777f;   // must match aspectRatio in videoTextureShader.vert
@@ -630,8 +571,8 @@ csv << "Frame,Backend,Filter,FPS\n";
                     RT[c][r] = static_cast<float>(R.at<double>(r, c));
                 RT[3][r] = static_cast<float>(tvecs[0][r]);
             }
-            // OpenCV camera (X right, Y down, Z forward) → OpenGL camera
-            // (X right, Y up, looking down −Z):  multiply by diag(1,−1,−1).
+            // OpenCV camera (X right, Y down, Z forward) - OpenGL camera
+            // (X right, Y up, looking down -Z):  multiply by diag(1,-1,-1).
             glm::mat4 G(1.0f);  G[1][1] = -1.0f;  G[2][2] = -1.0f;
             glm::mat4 MV = G * RT;
 
@@ -659,12 +600,12 @@ csv << "Frame,Backend,Filter,FPS\n";
             // an exact per-axis scale with no offset:
             //     screen_ndc.x = ax * nx ,   screen_ndc.y = ay * ny
             // ax, ay depend only on the (fixed) scene camera + quad, so we compute
-            // them once per frame from camVP — robust, no fragile least-squares.
+            // them once per frame from camVP - robust, no fragile least-squares.
             const glm::mat4 camVP = cam->getViewProjectionMatrix();
             const glm::vec4 ex = camVP * glm::vec4(A, 0.0f, 0.0f, 1.0f);
             const glm::vec4 ey = camVP * glm::vec4(0.0f, 1.0f, 0.0f, 1.0f);
-            const float ax = ex.x / ex.w;   // nx → screen ndc x
-            const float ay = ey.y / ey.w;   // ny → screen ndc y
+            const float ax = ex.x / ex.w;   // nx - screen ndc x
+            const float ay = ey.y / ey.w;   // ny - screen ndc y
 
             // Apply the scale in clip space (perspective preserved); keep the real
             // depth (z) so the cube self-occludes correctly.
@@ -683,29 +624,29 @@ csv << "Frame,Backend,Filter,FPS\n";
             cube->setVisible(true);
             cube->setScale(glm::vec3(1.0f));   // scale is baked into cubeLocal
             cube->setAROverride(cubeLocal, MV, P_screen);
-        } 
+        }
         else {
             cube->setVisible(false);
         }
 
-
-
+        // ====== STAGE 4: PROCESS & UPLOAD THE VIDEO FRAME ======
         if (useGPU) {
+            // GPU path: upload the raw frame and let the shader do the filtering;
+            // the interactive pan/rotate/zoom is applied to the quad transform.
             cv::flip(frame, frame, 0);
             videoTexture->update(frame.data, frame.cols, frame.rows, true);
 
-           
             quad->setTranslate(glm::vec3(translateX, translateY, 0.0f));
             quad->setRotate(rotateAngle);
             quad->setScale(scaleFactor);
 
-            
             if (activeFilter == FILTER_PIXELATE) quad->setShader(pixelateShader);
             else if (activeFilter == FILTER_SINCITY) quad->setShader(sinCityShader);
             else quad->setShader(defaultShader);
 
         } else {
-            // CPU path: apply filter then warpAffine transforms
+            // CPU path: apply the filter and the affine transform on the CPU, then
+            // upload the result and draw it through an untransformed quad.
             cv::Mat processed;
             if (activeFilter == FILTER_PIXELATE) CPUFilters::pixelate(frame, processed, 10);
             else if (activeFilter == FILTER_SINCITY) CPUFilters::sinCity(frame, processed);
@@ -721,22 +662,20 @@ csv << "Frame,Backend,Filter,FPS\n";
 
             videoTexture->update(rotated.data, rotated.cols, rotated.rows, true);
 
-            // CPU output uses default shader; show transformed image as-is
             quad->setShader(defaultShader);
-            // ensure quad identity transform so warped image maps directly
-            quad->setTranslate(glm::vec3(0.0f,0.0f,0.0f));
+            quad->setTranslate(glm::vec3(0.0f, 0.0f, 0.0f));
             quad->setRotate(0.0f);
             quad->setScale(1.0f);
         }
 
-        // Render
+        // ====== STAGE 5: RENDER & SWAP ======
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         scene->render(cam);
 
         glfwSwapBuffers(window);
         glfwPollEvents();
 
-        // FPS logging
+        // Report FPS roughly once per second.
         ++frameCount;
         auto now = chrono::high_resolution_clock::now();
         double elapsed = chrono::duration<double>(now - startTime).count();
@@ -745,7 +684,6 @@ csv << "Frame,Backend,Filter,FPS\n";
             csv << frameCount << "," << (useGPU ? "GPU" : "CPU") << "," << activeFilter << "," << fps << "\n";
             frameCount = 0;
             startTime = now;
-            // also print to console for convenience
             cout << "[MAIN] FPS: " << fixed << setprecision(2) << fps
                  << " | Mode: " << (useGPU ? "GPU" : "CPU")
                  << " | Filter: " << (activeFilter==FILTER_NONE ? "NONE" : (activeFilter==FILTER_PIXELATE ? "PIXELATE" : "SINCITY"))
@@ -753,7 +691,7 @@ csv << "Frame,Backend,Filter,FPS\n";
         }
     }
 
-    // cleanup
+    // ---- Cleanup ----
     cap.release();
 
     delete videoTexture;

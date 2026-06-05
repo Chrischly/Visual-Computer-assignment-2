@@ -47,13 +47,13 @@ private:
     // State
     bool visible = true;
 
-    // AR override
+    // AR override state
     bool hasOverride = false;
-    glm::mat4 overrideModel = glm::mat4(1.0f);
     glm::mat4 overrideView = glm::mat4(1.0f);
     glm::mat4 overrideProjection = glm::mat4(1.0f);
 
-    // Extra from old header
+    // Model transform: baseModelMatrix is the AR/marker pose, modelMatrix is that
+    // combined with the scale (see updateTransformFromModel).
     glm::mat4 baseModelMatrix = glm::mat4(1.0f);
     glm::mat4 modelMatrix = glm::mat4(1.0f);
     glm::vec3 scaleVec = glm::vec3(1.0f);

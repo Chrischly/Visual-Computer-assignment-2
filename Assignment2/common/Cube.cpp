@@ -73,7 +73,7 @@ Cube::~Cube() {
 
 void Cube::setModelMatrix(const glm::mat4& m) {
     baseModelMatrix = m;
-    updateTransformFromModel();  // if you want to apply scaling or other transforms
+    updateTransformFromModel();
 }
 
 
@@ -83,15 +83,13 @@ void Cube::render(Camera* camera) {
 
     shader->bind();
 
-    // Model matrix: override if pose comes from AR marker
     glm::mat4 model = modelMatrix;
 
-    // Camera matrices: use the AR intrinsic projection/view when overridden so
-    // the cube matches the real camera, otherwise fall back to the scene camera.
+    // Use the AR intrinsic projection/view when overridden so the cube matches
+    // the real camera, otherwise fall back to the scene camera.
     glm::mat4 view  = hasOverride ? overrideView       : camera->getViewMatrix();
     glm::mat4 proj  = hasOverride ? overrideProjection : camera->getProjectionMatrix();
 
-    // Send all matrices to your shader
     shader->setMat4("model", model);
     shader->setMat4("view",  view);
     shader->setMat4("projection", proj);
@@ -103,12 +101,9 @@ void Cube::render(Camera* camera) {
     // while still depth-testing against itself for correct face occlusion.
     if (hasOverride) glClear(GL_DEPTH_BUFFER_BIT);
 
-    // Draw cube
     glBindVertexArray(VAO);
     glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
     glBindVertexArray(0);
-
-    // Your Shader class has no unBind(), so we don’t call it.
 }
 
 void Cube::updateTransformFromModel() {
